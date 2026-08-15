@@ -1,0 +1,24 @@
+services:
+  moczka:
+    image: nousresearch/hermes-agent:latest
+    container_name: titatu-moczka
+    restart: unless-stopped
+    command: ["/bin/sh", "/opt/deploy/start.sh"]
+    ports:
+      - "8642:8642"
+    volumes:
+      - hermes-data:/opt/data
+      - ./agents/offer-agent:/opt/offer-agent:ro
+      - ./deploy:/opt/deploy:ro
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-8818011584}
+      WP_URL: ${WP_URL:-https://titatu.co.il}
+      WP_USERNAME: ${WP_USERNAME:-}
+      WP_APP_PASSWORD: ${WP_APP_PASSWORD:-}
+      WP_ORIGIN_URL: ${WP_ORIGIN_URL:-}
+      WP_ORIGIN_HOST: ${WP_ORIGIN_HOST:-titatu.co.il}
+
+volumes:
+  hermes-data:

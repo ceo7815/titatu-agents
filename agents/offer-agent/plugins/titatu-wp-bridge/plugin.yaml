@@ -1,0 +1,19 @@
+name: titatu-wp-bridge
+version: 1.0.0
+description: Read-only Titatu WordPress quote and stand tools
+provides_tools:
+  - wp_bridge_health
+  - get_bid
+  - search_bids
+  - find_bids
+  - list_bids_by_quote_status
+  - list_approved_today
+  - list_stands
+  - get_stand
+  - search_stands
+  - resolve_stands
+  - start_quote_intake
+  - submit_intake_message
+  - get_last_bid
+  - trash_bid
+  - update_quote

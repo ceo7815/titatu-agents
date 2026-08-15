@@ -1,0 +1,32 @@
+model:
+  default: gpt-4.1-mini
+  provider: openai-api
+
+terminal:
+  cwd: /opt/offer-agent
+
+skills:
+  external_dirs:
+    - /opt/offer-agent/skills
+
+agent:
+  max_turns: 40
+  reasoning_effort: none
+
+plugins:
+  enabled:
+    - titatu-wp-bridge
+
+platform_toolsets:
+  telegram: [titatu-wp, clarify, memory, skills]
+
+unauthorized_dm_behavior: pair
+
+platforms:
+  telegram:
+    reply_to_mode: off
+
+session_reset:
+  mode: both
+  idle_minutes: 120
+  at_hour: 4
