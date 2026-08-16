@@ -126,6 +126,10 @@ LABEL_ALIASES = {
 }
 
 _PHONE_RE = re.compile(r"(?:\+972[\s-]?|0)5\d[\s-]?\d{7}")
+_NOTE_LINE = re.compile(
+    r"^(?:תוסי[ףפי]\s+|הוסי[ףפי]\s+)?הער(?:ה|ות)(?:\s*כלליות)?\s*[:\-–]?\s*(.+)$"
+)
+_NOTE_ADD = re.compile(r"^(?:תוסי[ףפי]|הוסי[ףפי])\b")
 _EMAIL_RE = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.I)
 _TIME_RE = re.compile(r"(?:החל\s*מ-?\s*)?(\d{1,2}:\d{2})")
 _EVENT_HINTS = [
@@ -330,6 +334,38 @@ def _parse_message(text: str) -> dict[str, Any]:
     }
 
 
+def _merge_notes(previous: str, extra: str, *, append: bool) -> str:
+    extra = bid_write.plain_notes(extra)
+    if not extra:
+        return bid_write.plain_notes(previous)
+    if not append:
+        return extra
+    prev = bid_write.plain_notes(previous)
+    if not prev:
+        return extra
+    existing = {line.strip() for line in prev.splitlines() if line.strip()}
+    added = [line for line in extra.splitlines() if line.strip() and line.strip() not in existing]
+    return "\n".join([prev] + added) if added else prev
+
+
+def _extract_notes(raw: str) -> tuple[str, bool] | None:
+    found: list[tuple[str, bool]] = []
+    for line in (raw or "").splitlines():
+        clean = re.sub(r"^[\-•*\d\.\)\s]+", "", line).strip()
+        match = _NOTE_LINE.match(clean)
+        if not match:
+            continue
+        extra = match.group(1).strip()
+        if not extra or extra in {"כלליות", "כללית"}:
+            continue
+        found.append((extra, bool(_NOTE_ADD.match(clean))))
+    if not found:
+        return None
+    append = any(item[1] for item in found)
+    text = "\n".join(item[0] for item in found)
+    return text, append
+
+
 def _parse_block(text: str) -> dict[str, str]:
     parsed = _parse_message(text)
     found = dict(parsed["fields"])
@@ -342,6 +378,7 @@ def _absorb_message(state: dict[str, Any], raw: str) -> bool:
     parsed = _parse_message(raw)
     changed = False
     fields = dict(state.get("fields") or {})
+    incoming_notes = (parsed["fields"] or {}).pop("notes", None)
     if parsed["fields"]:
         fields.update(parsed["fields"])
         changed = True
@@ -361,8 +398,9 @@ def _absorb_message(state: dict[str, Any], raw: str) -> bool:
                 existing.append(name)
         state["pending_stand_names"] = existing
         changed = True
-    elif looks_like_add_stands(raw) or (
-        not looks_like_intake_block(raw) and re.search(r"(דוכן|תוסי[ףפי])", raw)
+    elif "דוכן" in (raw or "") and (
+        looks_like_add_stands(raw)
+        or (not looks_like_intake_block(raw) and re.search(r"(דוכן|תוסי[ףפי])", raw))
     ):
         stand_names = _stand_names_from_text(raw)
         if stand_names:
@@ -400,21 +438,11 @@ def _absorb_message(state: dict[str, Any], raw: str) -> bool:
     if re.search(r"עמדות\s*מעוצבות", raw):
         state["no_stands"] = bool(re.search(r"(לא|בלי|ללא)", raw))
         changed = True
-    for line in (raw or "").splitlines():
-        note = re.match(
-            r"(?:תוסיף\s+)?הער[הות](?:\s*כלליות)?\s*[:\-–]?\s*(.+)$",
-            line.strip(),
-        )
-        if not note:
-            continue
-        extra = note.group(1).strip()
-        if not extra or extra in {"כלליות", "כללית"}:
-            continue
-        if re.match(r"^תוסיף\s+", line.strip()):
-            prev = str(fields.get("notes") or "").strip()
-            fields["notes"] = (prev + "\n" + extra).strip() if prev else extra
-        else:
-            fields["notes"] = extra
+    extracted = _extract_notes(raw)
+    extra = (extracted[0] if extracted else "") or (incoming_notes or "").strip()
+    if extra:
+        append = extracted[1] if extracted else bool(_NOTE_ADD.search((raw or "").strip()))
+        fields["notes"] = _merge_notes(str(fields.get("notes") or ""), extra, append=append)
         changed = True
     state["fields"] = fields
     return changed
@@ -836,6 +864,8 @@ def _hydrate_from_wp(state: dict[str, Any]) -> dict[str, Any]:
     take("address", "customer_address")
     take("guests", "customer_guests", "participants")
     take("notes", "additional_notes")
+    if str(fields.get("notes") or "").strip():
+        fields["notes"] = bid_write.plain_notes(str(fields["notes"]))
     state["fields"] = fields
     if not str(state.get("title") or "").strip():
         state["title"] = _wp_title(item)
@@ -1583,7 +1613,7 @@ def _apply_working_patch(session_id: str, state: dict[str, Any], raw: str) -> di
         for name in _stand_names_from_text(raw):
             if name not in names:
                 names.append(name)
-    if names:
+    if names and not (_extract_notes(raw) and "דוכן" not in (raw or "")):
         return _ingest_stand_names(session_id, state, ", ".join(names), append=True)
     if not changed:
         return _ask_what_to_change(session_id, state)

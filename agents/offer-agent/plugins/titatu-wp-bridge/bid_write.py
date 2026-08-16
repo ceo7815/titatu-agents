@@ -33,16 +33,30 @@ def _guests(raw: Any) -> int | str:
     return text
 
 
+def plain_notes(raw: str) -> str:
+    """Strip HTML / bullets so notes stay one clean line per request."""
+    text = (raw or "").replace("\r\n", "\n")
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+    text = re.sub(r"</(?:li|p|div|h[1-6])>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    lines: list[str] = []
+    seen: set[str] = set()
+    for line in text.splitlines():
+        item = re.sub(r"^[-•*]+\s*", "", line).strip()
+        item = re.sub(r"^(?:הערות(?:\s*כלליות)?|הערה)\s*[:\-–]\s*", "", item).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        lines.append(item)
+    return "\n".join(lines)
+
+
 def format_notes(raw: str, fmt: str | None) -> str:
-    text = (raw or "").replace("\r\n", "\n").strip()
-    if not text:
-        return ""
-    if fmt == "continuous":
-        return " · ".join(line.strip() for line in text.splitlines() if line.strip())
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    items = [re.sub(r"^[-•*]\s*", "", line) for line in lines]
+    items = [line for line in plain_notes(raw).splitlines() if line.strip()]
     if not items:
         return ""
+    if fmt == "continuous" or len(items) == 1:
+        return " · ".join(items) if fmt == "continuous" else items[0]
     return "<ul>\n" + "\n".join(f"<li>{item}</li>" for item in items) + "\n</ul>"
 
 

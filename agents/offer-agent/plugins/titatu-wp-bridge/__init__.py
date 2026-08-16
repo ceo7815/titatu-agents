@@ -134,3 +134,8 @@ def register(ctx):
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("on_session_reset", _on_session_reset)
     ctx.register_hook("pre_gateway_dispatch", gateway_intake.on_pre_gateway_dispatch)
+    from . import ops
+
+    ctx.register_hook("post_api_request", ops.on_post_api_request)
+    ctx.register_hook("post_llm_call", ops.on_post_llm_call)
+    ops.seed_paired_users()

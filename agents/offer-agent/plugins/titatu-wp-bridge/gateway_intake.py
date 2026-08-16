@@ -69,6 +69,23 @@ def _run_coro(gateway, coro) -> None:
     safe_schedule_threadsafe(coro, loop, logger=log, log_message="intake send failed")
 
 
+def _note(direction: str, event=None, text: str = "") -> None:
+    try:
+        from . import ops
+
+        uid, name = "", ""
+        if event is not None:
+            extra = [_sid(event)]
+            source = getattr(event, "source", None)
+            chat_id = str(getattr(source, "chat_id", "") or "")
+            if chat_id:
+                extra.append(chat_id)
+            uid, name = ops.remember_speaker(event, extra_keys=extra)
+        ops.log_chat(direction, platform_user_id=uid, display_name=name, body=text)
+    except Exception:
+        log.exception("ops activity failed")
+
+
 def _send_text(gateway, event, text: str) -> None:
     if not (text or "").strip():
         return
@@ -135,6 +152,7 @@ def _choice_body(result: dict[str, Any]) -> str:
 
 
 def _deliver(gateway, event, sid: str, result: dict[str, Any]) -> None:
+    _note("out", event, _choice_body(result) if result.get("use_clarify") else str(result.get("say") or ""))
     if result.get("use_clarify") and result.get("choices"):
         threading.Thread(
             target=_clarify_wait,
@@ -236,6 +254,7 @@ def on_pre_gateway_dispatch(event, gateway, **kwargs):
     text = str(getattr(event, "text", "") or "").strip()
     if not text or intake.looks_like_memory_nudge(text):
         return None
+    _note("in", event, text)
     if text.startswith("/"):
         cmd = text.split()[0].split("@")[0]
         if cmd in {"/new", "/reset"}:
@@ -253,6 +272,7 @@ def on_pre_gateway_dispatch(event, gateway, **kwargs):
         if result.get("use_clarify") and result.get("choices"):
             _deliver(gateway, event, sid, result)
         else:
+            _note("out", event, str(result.get("say") or ""))
             _send_text(gateway, event, str(result.get("say") or ""))
         return {"action": "skip", "reason": "intake-ops"}
 

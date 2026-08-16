@@ -4,21 +4,35 @@ services:
     container_name: titatu-moczka
     restart: unless-stopped
     command: ["/bin/sh", "/opt/deploy/start.sh"]
-    ports:
-      - "8642:8642"
     volumes:
       - hermes-data:/opt/data
       - ./agents/offer-agent:/opt/offer-agent:ro
       - ./deploy:/opt/deploy:ro
     environment:
+      HERMES_HOME: /opt/data
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-8818011584}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-6656794957,8818011584}
       WP_URL: ${WP_URL:-https://titatu.co.il}
       WP_USERNAME: ${WP_USERNAME:-}
       WP_APP_PASSWORD: ${WP_APP_PASSWORD:-}
       WP_ORIGIN_URL: ${WP_ORIGIN_URL:-}
       WP_ORIGIN_HOST: ${WP_ORIGIN_HOST:-titatu.co.il}
+      SUPABASE_URL: ${SUPABASE_URL:-https://zcfhghdfywzsepnjyiih.supabase.co}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      OPS_INGEST_SECRET: ${OPS_INGEST_SECRET:-}
+      TITATU_AGENT_SLUG: ${TITATU_AGENT_SLUG:-moczka}
+
+  dashboard:
+    build:
+      context: ./dashboard
+      args:
+        VITE_SUPABASE_URL: ${SUPABASE_URL:-https://zcfhghdfywzsepnjyiih.supabase.co}
+        VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+    container_name: titatu-dashboard
+    restart: unless-stopped
+    ports:
+      - "8080:80"
 
 volumes:
   hermes-data:
