@@ -20,15 +20,15 @@ OPENING = (
     "אפשר לכתוב חופשי, גם עם שגיאות כתיב — אני מבין עניין.\n"
     "שלח את פרטי האירוע:\n"
     "\n"
-    "• שם לקוח\n"
-    "• שם המזמין\n"
-    "• מספר טלפון\n"
-    "• תאריך האירוע\n"
-    "• שעות ההגשה\n"
-    "• מיקום האירוע\n"
-    "• כמות אורחים\n"
-    "• אימייל _(לא חובה)_\n"
-    "• הערות כלליות _(לא חובה)_"
+    "1. שם לקוח\n"
+    "2. שם המזמין\n"
+    "3. מספר טלפון\n"
+    "4. תאריך האירוע\n"
+    "5. שעות ההגשה\n"
+    "6. מיקום האירוע\n"
+    "7. כמות אורחים\n"
+    "8. אימייל _(לא חובה)_\n"
+    "9. הערות כלליות _(לא חובה)_"
 )
 
 INTAKE_STEPS = {
@@ -61,6 +61,8 @@ OPTIONAL = [
     ("email", "אמייל"),
     ("notes", "הערות כלליות"),
 ]
+NUMBERED_FIELDS = [key for key, _label in REQUIRED] + [key for key, _label in OPTIONAL]
+_NUMBERED_LINE = re.compile(r"^\s*(\d{1,2})[\.\)\-–:]\s*(.+)$")
 
 FALLBACK_EVENT_TYPES = [
     {"id": 38, "label": "חתונה"},
@@ -251,13 +253,44 @@ def _parse_discount(value: str) -> tuple[float | None, str]:
     return amount, note
 
 
+def _numbered_field_values(text: str) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for raw_line in (text or "").splitlines():
+        match = _NUMBERED_LINE.match((raw_line or "").strip())
+        if not match:
+            continue
+        idx = int(match.group(1))
+        value = match.group(2).strip()
+        if not value or "לא חובה" in value:
+            continue
+        labeled = _split_labeled(value)
+        key = _label_key(labeled[0]) if labeled else None
+        if key in {"_stands", "_discount", "_ignore", "_title"}:
+            continue
+        if key and labeled and labeled[1].strip() and "לא חובה" not in labeled[1]:
+            value = labeled[1].strip()
+        elif 1 <= idx <= len(NUMBERED_FIELDS):
+            key = NUMBERED_FIELDS[idx - 1]
+        else:
+            continue
+        if key == "serve_time":
+            value = _clean_serve_time(value)
+        if value:
+            found[key] = value
+    return found
+
+
 def _parse_message(text: str) -> dict[str, Any]:
     fields: dict[str, str] = {}
     stand_names: list[str] = []
     discount = None
     discount_note = ""
     pending: str | None = None
+    numbered = _numbered_field_values(text)
     for raw_line in (text or "").splitlines():
+        numbered_hit = _NUMBERED_LINE.match((raw_line or "").strip())
+        if numbered_hit and 1 <= int(numbered_hit.group(1)) <= len(NUMBERED_FIELDS):
+            continue
         clean = re.sub(r"^[\-•*\d\.\)\s]+", "", re.sub(r"\s+", " ", raw_line)).strip()
         if not clean:
             pending = pending if pending == "_stands" else None
@@ -313,6 +346,9 @@ def _parse_message(text: str) -> dict[str, Any]:
         if pending and "לא חובה" not in clean:
             fields[pending] = clean
             pending = None
+    for key, val in numbered.items():
+        if val and not str(fields.get(key) or "").strip():
+            fields[key] = val
     if not fields.get("phone"):
         found = _PHONE_RE.search(text or "")
         if found:
