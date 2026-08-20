@@ -1122,6 +1122,8 @@ def _ask_stands(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
     if pending:
         state["pending_stand_names"] = []
         return _ingest_stand_names(session_id, state, ", ".join(pending))
+    if state.get("stand_confirm_queue") or state.get("stand_pending") or state.get("stands"):
+        return _next_stand_step(session_id, state)
     state["step"] = "stands"
     state.setdefault("stands", [])
     return _reply(
@@ -1148,7 +1150,21 @@ def _stand_label(stand: dict[str, Any]) -> str:
 
 def _split_stand_names(text: str) -> list[str]:
     parts = re.split(r"[,،\n]+|\s+וגם\s+|\s+ו\s+", text or "")
-    return [part.strip(" .") for part in parts if part.strip(" .")]
+    out: list[str] = []
+    for part in parts:
+        item = part.strip(" .")
+        if not item:
+            continue
+        words = item.split()
+        if (
+            "דוכן" not in item
+            and 2 <= len(words) <= 4
+            and all(len(word) >= 3 and _looks_like_stand_candidate(word) for word in words)
+        ):
+            out.extend(words)
+        else:
+            out.append(item)
+    return out
 
 
 def looks_like_stand_talk(text: str) -> bool:
@@ -2012,15 +2028,20 @@ def submit_intake(session_id: str, text: str) -> dict[str, Any]:
         return _ask_missing(session_id, state)
 
     if step == "title":
-        if looks_like_change(raw) or _parse_block(raw):
+        parsed = _parse_message(raw)
+        if parsed["fields"] or parsed["stands"] or looks_like_change(raw) or _parse_block(raw):
             _absorb_message(state, raw)
-            if state.get("title"):
+            if str(state.get("title") or "").strip():
                 return _continue_after_title(session_id, state)
             return _ask_title(session_id, state)
         state["title"] = raw
         return _continue_after_title(session_id, state)
 
     if step == "event_type":
+        parsed = _parse_message(raw)
+        if parsed["fields"] or parsed["stands"]:
+            _absorb_message(state, raw)
+            return _ask_event_type(session_id, state)
         types = state.get("event_types") or _event_types()
         if raw.strip() in {"עוד סוגים", "עוד", "אחר"}:
             return _ask_event_type(session_id, state)
