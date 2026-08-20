@@ -62,7 +62,21 @@ OPTIONAL = [
     ("notes", "הערות כלליות"),
 ]
 NUMBERED_FIELDS = [key for key, _label in REQUIRED] + [key for key, _label in OPTIONAL]
-_NUMBERED_LINE = re.compile(r"^\s*(\d{1,2})[\.\)\-–:]\s*(.+)$")
+_NUMBERED_LINE = re.compile(r"^\s*(\d{1,2})(?:[\.\)\-–:]|\s)\s*(.+)$")
+_FORM_STEPS = {
+    "block",
+    "missing",
+    "title",
+    "event_type",
+    "decorated",
+    "price_per",
+    "notes_format",
+    "stands",
+    "stand_choice",
+    "confirm",
+    "confirm_delete",
+    "ready",
+}
 
 FALLBACK_EVENT_TYPES = [
     {"id": 38, "label": "חתונה"},
@@ -275,6 +289,42 @@ def _numbered_field_values(text: str) -> dict[str, str]:
             continue
         if key == "serve_time":
             value = _clean_serve_time(value)
+        if key == "guests":
+            value = re.sub(r"\s*אורחים\s*$", "", value).strip() or value
+        if value:
+            found[key] = value
+    return found
+
+
+def _positional_field_values(text: str) -> dict[str, str]:
+    """Map unlabeled / '1 name' lines in list order when Sahar dumps details."""
+    lines: list[str] = []
+    for raw_line in (text or "").splitlines():
+        clean = (raw_line or "").strip()
+        if not clean:
+            continue
+        if re.search(r"(סוגי\s*דוכנ|רשימת\s*דוכנ|^דוכנים\s*$)", clean) and not _split_labeled(clean):
+            break
+        numbered = _NUMBERED_LINE.match(clean)
+        if numbered and 1 <= int(numbered.group(1)) <= len(NUMBERED_FIELDS):
+            clean = numbered.group(2).strip()
+        labeled = _split_labeled(clean)
+        if labeled and _label_key(labeled[0]):
+            continue
+        if clean:
+            lines.append(clean)
+    if len(lines) < 5:
+        return {}
+    found: dict[str, str] = {}
+    for idx, line in enumerate(lines):
+        if idx >= len(REQUIRED):
+            break
+        key = REQUIRED[idx][0]
+        value = line
+        if key == "serve_time":
+            value = _clean_serve_time(value)
+        if key == "guests":
+            value = re.sub(r"\s*אורחים\s*$", "", value).strip() or value
         if value:
             found[key] = value
     return found
@@ -287,6 +337,7 @@ def _parse_message(text: str) -> dict[str, Any]:
     discount_note = ""
     pending: str | None = None
     numbered = _numbered_field_values(text)
+    positional = _positional_field_values(text) if len(numbered) < 5 else {}
     for raw_line in (text or "").splitlines():
         numbered_hit = _NUMBERED_LINE.match((raw_line or "").strip())
         if numbered_hit and 1 <= int(numbered_hit.group(1)) <= len(NUMBERED_FIELDS):
@@ -346,9 +397,10 @@ def _parse_message(text: str) -> dict[str, Any]:
         if pending and "לא חובה" not in clean:
             fields[pending] = clean
             pending = None
-    for key, val in numbered.items():
-        if val and not str(fields.get(key) or "").strip():
-            fields[key] = val
+    for source in (numbered, positional):
+        for key, val in source.items():
+            if val and not str(fields.get(key) or "").strip():
+                fields[key] = val
     if not fields.get("phone"):
         found = _PHONE_RE.search(text or "")
         if found:
@@ -522,13 +574,6 @@ def _infer_event_type(text: str) -> dict[str, Any] | None:
 
 
 def _continue_after_title(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
-    inferred = _infer_event_type(state.get("title") or "") or _infer_event_type(
-        state.get("source_message") or ""
-    )
-    if inferred and not state.get("bid_type_id"):
-        state["bid_type_id"] = inferred["id"]
-        state["bid_type_label"] = inferred["label"]
-        return _ask_decorated(session_id, state)
     return _ask_event_type(session_id, state)
 
 
@@ -673,11 +718,22 @@ _CONVO_MARK = re.compile(
 )
 
 
+def is_form_step(state: dict[str, Any] | None) -> bool:
+    return str((state or {}).get("step") or "") in _FORM_STEPS
+
+
+def looks_like_resume_last(text: str) -> bool:
+    t = (text or "").strip()
+    return bool(re.search(r"(הטיוטה|ההצעה האחרונה|ההצעה הקודמת|תחזיר את ההצעה)", t))
+
+
 def is_structured_reply(state: dict[str, Any] | None, text: str) -> bool:
     """True when the message is a form answer, not free conversation."""
     raw = (text or "").strip()
     if not raw:
         return False
+    if is_form_step(state):
+        return True
     if looks_like_approve(raw) or looks_like_reject(raw) or looks_like_cancel(raw):
         return True
     if looks_like_publish(raw) or looks_like_want_edit(raw):

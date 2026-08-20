@@ -305,18 +305,23 @@ def on_pre_gateway_dispatch(event, gateway, **kwargs):
                     log.exception("failed to resolve pending clarify")
                 return {"action": "skip", "reason": "intake-clarify-text"}
             _cancel_pending(sid, session_key)
-        if intake.is_structured_reply(state, text):
+        if intake.is_form_step(state) or intake.is_structured_reply(state, text):
             result = intake.submit_intake(sid, text)
             _deliver(gateway, event, sid, result)
             return {"action": "skip", "reason": "intake-submit"}
         return None
 
+    if intake.looks_like_resume_last(text) and (
+        intake.load_last_bid() or ((state or {}).get("wp_id") if state else None)
+    ):
+        result = intake.resume_working(sid)
+        _deliver(gateway, event, sid, result)
+        return {"action": "skip", "reason": "intake-resume-last"}
+
     if intake.looks_like_quote_intent(text) or intake.looks_like_intake_block(text):
         if intake.looks_like_intake_block(text):
             intake.start_intake(sid, force=True)
             result = intake.submit_intake(sid, text)
-        elif intake.load_last_bid() or ((state or {}).get("wp_id") if state else None):
-            result = intake.resume_working(sid)
         else:
             result = intake.start_intake(sid, force=True)
         _deliver(gateway, event, sid, result)

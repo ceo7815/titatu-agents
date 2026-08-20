@@ -86,17 +86,18 @@ def _on_pre_llm_call(session_id: str, user_message: str, **kwargs):
                 return _inject(intake.apply_free_update(sid, text))
     state = intake.load_state(sid)
     if intake.is_active(state):
-        if intake.is_structured_reply(state, text):
+        if intake.is_form_step(state) or intake.is_structured_reply(state, text):
             return _inject(intake.submit_intake(sid, text))
         return _brain_context(state, text)
     if intake.looks_like_intake_block(text):
         intake.start_intake(sid, force=True)
         return _inject(intake.submit_intake(sid, text))
-    if intake.looks_like_quote_intent(text):
+    if intake.looks_like_resume_last(text):
         last = intake.load_last_bid()
         if last or (state or {}).get("wp_id"):
             return _inject(intake.resume_working(sid))
-        return _inject(intake.start_intake(sid))
+    if intake.looks_like_quote_intent(text):
+        return _inject(intake.start_intake(sid, force=True))
     return None
 
 
