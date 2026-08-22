@@ -171,6 +171,8 @@ def draft_to_meta(draft: dict[str, Any]) -> dict[str, Any]:
         "customer_serve_time": str(draft.get("serve_time") or "").strip(),
         "customer_guests": guests,
         "participants": guests,
+        "additional_stands_num": _guests(draft.get("additional_stands_num")),
+        "additional_crew_num": _guests(draft.get("additional_crew_num")),
         "no_packages": "true",
         "no_stands": _flag(bool(draft.get("no_stands"))),
         "show_price_per_participants": _flag(bool(draft.get("show_price_per_participants"))),

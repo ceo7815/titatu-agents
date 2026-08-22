@@ -36,6 +36,8 @@ INTAKE_STEPS = {
     "missing",
     "title",
     "event_type",
+    "buffets",
+    "crew",
     "decorated",
     "price_per",
     "notes_format",
@@ -68,6 +70,8 @@ _FORM_STEPS = {
     "missing",
     "title",
     "event_type",
+    "buffets",
+    "crew",
     "decorated",
     "price_per",
     "notes_format",
@@ -77,6 +81,7 @@ _FORM_STEPS = {
     "confirm_delete",
     "ready",
 }
+_COUNT_ONLY = re.compile(r"^\s*(\d{1,4})\s*$")
 
 FALLBACK_EVENT_TYPES = [
     {"id": 38, "label": "חתונה"},
@@ -956,6 +961,10 @@ def _hydrate_from_wp(state: dict[str, Any]) -> dict[str, Any]:
     take("address", "customer_address")
     take("guests", "customer_guests", "participants")
     take("notes", "additional_notes")
+    if state.get("additional_stands_num") in (None, "") and meta.get("additional_stands_num") not in (None, ""):
+        state["additional_stands_num"] = meta.get("additional_stands_num")
+    if state.get("additional_crew_num") in (None, "") and meta.get("additional_crew_num") not in (None, ""):
+        state["additional_crew_num"] = meta.get("additional_crew_num")
     if str(fields.get("notes") or "").strip():
         fields["notes"] = bid_write.plain_notes(str(fields["notes"]))
     state["fields"] = fields
@@ -1076,6 +1085,49 @@ def _ask_event_type(session_id: str, state: dict[str, Any], page: int = 0) -> di
     choices = [str(row["label"]) for row in types]
     say = "*סוג האירוע*\nבחר מהכפתורים:"
     return _reply(session_id, state, say, use_clarify=True, choices=choices)
+
+
+def _parse_count_only(raw: str) -> int | None:
+    match = _COUNT_ONLY.fullmatch(raw or "")
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _count_filled(value: Any) -> bool:
+    return value not in (None, "")
+
+
+def _ask_buffets(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    state["step"] = "buffets"
+    return _reply(
+        session_id,
+        state,
+        "*כמות מזנונים*\nכמה מזנונים לשים בהצעה?\nרשום רק מספר, בלי מילים.",
+    )
+
+
+def _ask_crew(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    state["step"] = "crew"
+    return _reply(
+        session_id,
+        state,
+        "*כמות עובדים*\nכמה עובדים לשים בהצעה?\nרשום רק מספר, בלי מילים.",
+    )
+
+
+def _continue_after_event_type(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    if not _count_filled(state.get("additional_stands_num")):
+        return _ask_buffets(session_id, state)
+    if not _count_filled(state.get("additional_crew_num")):
+        return _ask_crew(session_id, state)
+    return _ask_decorated(session_id, state)
+
+
+def _continue_after_buffets(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    if not _count_filled(state.get("additional_crew_num")):
+        return _ask_crew(session_id, state)
+    return _ask_decorated(session_id, state)
 
 
 def _ask_decorated(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
@@ -1536,6 +1588,8 @@ def _draft_from_state(state: dict[str, Any]) -> dict[str, Any]:
         "notes_format": state.get("notes_format"),
         "bid_type_id": state.get("bid_type_id"),
         "bid_type_label": state.get("bid_type_label"),
+        "additional_stands_num": state.get("additional_stands_num"),
+        "additional_crew_num": state.get("additional_crew_num"),
         "no_stands": state.get("no_stands"),
         "show_price_per_participants": bool(state.get("show_price_per_participants")),
         "extra_discount": state.get("extra_discount"),
@@ -1558,6 +1612,8 @@ def _summary_lines(state: dict[str, Any]) -> list[str]:
         f"• אורחים: {draft['guests']}",
         f"• כותרת: {draft['title']}",
         f"• סוג אירוע: {draft['bid_type_label']}",
+        f"• מזנונים: {draft.get('additional_stands_num')}",
+        f"• עובדים: {draft.get('additional_crew_num')}",
         f"• עמדות מעוצבות: {'כן' if draft['no_stands'] is False else 'לא'}",
         f"• מחיר לסועד: {'כן' if draft.get('show_price_per_participants') else 'לא'}",
     ]
@@ -1931,6 +1987,10 @@ def _replay(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
         return _ask_title(session_id, state)
     if step == "event_type":
         return _ask_event_type(session_id, state)
+    if step == "buffets":
+        return _ask_buffets(session_id, state)
+    if step == "crew":
+        return _ask_crew(session_id, state)
     if step == "decorated":
         return _ask_decorated(session_id, state)
     if step == "price_per":
@@ -2060,6 +2120,20 @@ def submit_intake(session_id: str, text: str) -> dict[str, Any]:
             return _ask_event_type(session_id, state)
         state["bid_type_id"] = match.get("id")
         state["bid_type_label"] = match.get("label")
+        return _continue_after_event_type(session_id, state)
+
+    if step == "buffets":
+        count = _parse_count_only(raw)
+        if count is None:
+            return _ask_buffets(session_id, state)
+        state["additional_stands_num"] = count
+        return _continue_after_buffets(session_id, state)
+
+    if step == "crew":
+        count = _parse_count_only(raw)
+        if count is None:
+            return _ask_crew(session_id, state)
+        state["additional_crew_num"] = count
         return _ask_decorated(session_id, state)
 
     if step == "decorated":
